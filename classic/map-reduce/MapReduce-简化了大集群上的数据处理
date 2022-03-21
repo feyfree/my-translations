@@ -8,7 +8,7 @@
 >
 > 我们 MapReduce 的实现，是运行在一个由大量商业机器上的集群，并且是高度可扩展的：一个典型的MapReduce 在成千上万的机上面处理以 T 为单位计算的数据集合。程序员可以发现这个系统使用非常容易：实现了MapReduce的函数有成百上千个，而且每天有超过1000个MapReduce的任务在Google的集群上运行。
 
-## 1.介绍
+## 1.介绍（Introduction）
 
 在过去的5年中，作者还有许多Google的其他同事为了处理海量的原始数据， 比如爬取的文档，web请求日志等等， 为了计算各种各样的衍生的数据，实现了成百上千个特定的计算程序， 比如倒排索引， 各种各样的网络文档的图数据结构，每个host上面爬取的页面汇总， 指定某天最频繁的请求的集合等等。大部分这些计算程序从概念上看都比较直接。 但是， 数据输入通常比较大，计算任务需要被分配到成百上千台机器上，并且需要在一个合理的时间内完成。如何处理并行计算、如何分发数据、如何处理错误？所有这些问题综合在一起，需要大量的代码处理，因此也使得原本简单的运算变得难以处理。
 
@@ -17,5 +17,58 @@
 这项工作的主要贡献是通过简单的接口来实现自动的并行化和大规模计算，并且通过实现了这种接口（map reduce）的程序， 可以实现在海量普通PC上的高性能计算。
 
 第二部分描述基本的编程模型和一些使用案例。第三部分描述了一个经过裁剪的、适合我们的基于集群的计算环境的MapReduce实现。第四部分描述我们认为在MapReduce编程模型中一些实用的技巧。第五部分对于各种不同的任务，测量我们MapReduce实现的性能。第六部分揭示了在Google内部如何使用MapReduce作为基础重写我们的索引系统产品，包括其它一些使用MapReduce的经验。第七部分讨论相关的和未来的工作。
+
+## 2. 编程模型（Programming Model）
+
+这种计算使用了一组 *key/value* 对形式的输入，然后产生一组 *key/value* 对形式的输出。使用了 MapReduce 库的用户将计算表述成两种函数：*Map and Reduce*。
+
+用户编写的*Map* 利用输入对（pair） 的形式并产生一组 中间状态的 *key/value* 对形式的数据。MapReduce 库将所有values以相同的中间状态的 key  （比如 *I*）分组合并然后将这些数据传递给 *Reduce* 函数
+
+用户编写的*Reduce* 接受一个中间状态的 key （比如 *I*）和 与这 key 相关的一组values。这个函数将这些数据合并，尽可能形成一个小规模的values 集合。通常每个*Reduce* 调用只会产生 0 或者 1 个 输出值。用户可以迭代使用reduce函数生成一中间状态的values。 这也使得我们可以处理无法全部放入内存的那些数据
+
+### 2.1 示例（Examples）
+
+设想一个场景：计算大量文档中每个单词出现的数量。用户可能写出下面类似的伪代码
+
+```java
+map(String key, String value):
+    // key: document name
+    // value: document contents
+    for each word w in value:
+        EmitIntermediate(w, "1");
+
+reduce(String key, Iterator values):
+    // key: a word
+    // values: a list of counts
+    int result = 0;
+    for each v in values:
+    	result += ParseInt(v);
+    Emit(AsString(result));
+```
+
+map 函数将每个单词加上相关的出现次数（这里是 1）。reduce 函数计算每个单词的汇总数量。
+
+另外，用户需要在 mapreduce 相关的配置中写上输入输出的文件名，以及一些可选参数。然后用户可以使用这些参数调用 *MapReduce* 函数。用户编写的代码与MapReduce 库（C++实现）相连接。附录A包含这个示例的完整代码片段。
+
+### 2.2 类型（Types）
+
+尽管之前的伪代码是以 string 类型作为输入输出， 但是从概念上讲， 用户提供给map 和 reduce 函数的参数类型是如下定义
+
+```text
+map (k1,v1) → list(k2,v2)
+reduce (k2,list(v2)) → list(v2)
+```
+
+定义：输入的keys和values 和 输出的keys，values 是来自不同的领域。进一步讲，中间状态的keys 和 values 和输出是来自同一领域。
+
+我们的C++实现将 字符串数据通过我们定义的函数传递， 然后将这些数据丢给我们的代码， 来进行字符串和合适类型的相关转换。
+
+### 2.3 更多示例（More Examples）
+
+下面是几个比较有趣的可以用*MapReduce* 来计算的简单示例
+
+
+
+
 
  
