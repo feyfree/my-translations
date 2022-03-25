@@ -67,8 +67,32 @@ reduce (k2,list(v2)) → list(v2)
 
 下面是几个比较有趣的可以用*MapReduce* 来计算的简单示例
 
+**分布式检索（Distributed Grep）**：map 函数输出符合指定的模式（pattern）的一行文本。reduce 函数将所有中间状态的数据拷贝到输出
 
+**计算URL的访问频率（Count Of URL Access Frequency）**: map 函数处理网页请求日志，然后以<URL, 1>这种形式输出。 reduce 函数将这些以相同URL 的数据累加，然后输出 <URL, total count> 键值对
 
+**反转Web引用拓扑图（Reverse Web-Link Graph）**： map函数会将在一个网页（命名为source）上面发现的每个引用 target URL 以 <target, source> 形式输出。 然后reduce 函数将这些以相同target关联的source 合并为列表， 并输出<target, list(source)> 键值对
 
+**每个主机上面的词条向量统计（Term-Vector per Host）**: 词向量（term vector）是对一个或者一系列文档上面出现的最重要的词语，以列表<word, frequency> 形式对输出。map 函数为每一个输入的文档输出一个<hostname, term vector>的键值对（其中host那么是从文档中的URL解析而来）。reduce 函数会接收这些数据， 将这些词向量累加， 丢弃掉低频词汇，然后最终输出<hostname, term vector> 键值对
 
- 
+![image-20220321190256065](../../resources/map_reduce/map_reduce_01.png)
+
+ **倒排索引（Inverted Index）**： map 函数解析每个文档， 然后以<word, document ID> （单词， 文档ID）这种形式输出。reduce 函数接收这串数据， 然后根据每个word，对相关得文档ID进行排序， 然后以<word, list(document ID)> 这种形式输出。 这种输出的键值对形成了一个简单的倒置索引， 这样方便我们去高效地去记录每个单词出现的位置
+
+**分布式排序（Distributed Sort）**：map 函数将每个记录中的key进行抽取， 然后输出<key， record> 键值对，然后reduce 函数将这些键值对原封不动的进行输出。这个计算依赖于分区的设备（4.1 章节描述）还有排序配置（4.2描述）
+
+## 3. 实现（Implementation）
+
+MapReduce 接口的实现有许多， 我们需要因地制宜。例如， 一种实现可能适合在一台小的共享内存的机器上面运行，另外一种实现可能更适合一个在多处理器NUMA架构下运行， 或者还有一种适合在由大量网络互联的机器集群上面运行。
+
+这个章节描述了一种在Google计算环境广泛运行的MapReduce的实现， 这种计算环境：由大量以太网互联的普通PC机器构成的集群。环境构成如下：
+
+1. 机器一般是Linux机器，每台机器 2-4GB的内存， 双核x86的处理器
+2. 网卡设备一般是100M/s的速度，或者是1G/s (机器级别)，但是平均下来一半都用不了
+3. 一个集群由成千上百台机器组成，机器故障是常有的事
+4. 每台机器上面挂载着普通的磁盘。我们开发了分布式文件系统， 在这些磁盘上管理数据。 这个文件系统使用复制手段， 在这些不可靠的机器上面提供可用性和可靠性
+5. 用户提交Job(作业)到一个调度系统。每个Job由一组task组成， 并且被调度系统分配到集群上面的一组可用的机器上面。
+
+### 3.1 运行概览（Execution Overview）
+
+通过将Map调用的输入数据自动分割为 *M* 个数据片段的集合， Map 调用被分布到多台机器上执行。输入的数据片段能够在不同的机器上面并行处理。Reduce 函数将Map调用产生的中间状态的 key 值分成 *R* 个不同分区（例如，hash(key)* **mod** *R*）。Reduce 函数也被分不到多台机器上执行。分区数量 *R* 和分区函数由用户定义
